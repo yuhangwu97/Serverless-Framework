@@ -1,0 +1,200 @@
+/* 应用主样式 */
+
+.app {
+  min-height: 100vh;
+  background-color: #f5f7fa;
+}
+
+/* 应用加载状态 */
+.app-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6A5ACD 0%, #4169E1 50%, #1E90FF 100%);
+  color: white;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top: 4px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-container p {
+  font-size: 16px;
+  margin: 0;
+  opacity: 0.9;
+}
+
+/* 动画 */
+@keyframes spin {
+  0% { 
+    transform: rotate(0deg); 
+  }
+  100% { 
+    transform: rotate(360deg); 
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.6s ease-out;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .loading-container {
+    padding: 20px;
+  }
+  
+  .loading-container p {
+    font-size: 14px;
+  }
+}
+
+/* 错误处理 */
+.app-error {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f8f9fa;
+  padding: 20px;
+}
+
+.error-container {
+  text-align: center;
+  max-width: 400px;
+}
+
+.error-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  color: #dc3545;
+}
+
+.error-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 12px;
+}
+
+.error-message {
+  font-size: 16px;
+  color: #666;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.error-button {
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.error-button.primary {
+  background: #4169E1;
+  color: white;
+}
+
+.error-button.primary:hover {
+  background: #3557c7;
+  transform: translateY(-1px);
+}
+
+.error-button.secondary {
+  background: #f8f9fa;
+  color: #4a5568;
+  border: 1px solid #e2e8f0;
+}
+
+.error-button.secondary:hover {
+  background: #e2e8f0;
+}
+
+/* 全局覆盖样式 */
+.app * {
+  box-sizing: border-box;
+}
+
+.app input:focus,
+.app textarea:focus,
+.app select:focus {
+  outline: none;
+  border-color: #4169E1 !important;
+  box-shadow: 0 0 0 3px rgba(65, 105, 225, 0.1) !important;
+}
+
+.app button:focus {
+  outline: 2px solid #4169E1;
+  outline-offset: 2px;
+}
+
+/* 无障碍支持 */
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+  }
+  
+  .fade-in {
+    animation: none;
+  }
+  
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+  .app {
+    filter: contrast(1.2);
+  }
+}
+
+/* 打印样式 */
+@media print {
+  .app {
+    background: white !important;
+  }
+  
+  .loading-container,
+  .error-container {
+    display: none;
+  }
+}

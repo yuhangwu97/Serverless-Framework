@@ -7,7 +7,7 @@
 *.tmp
 /3-nodejs-middle-platform/node_modules/
 /1-react-frontend/node_modules/
-.*/settings.local.json
+.*\/settings.local.json
 /.vscode/
 /.idea/
 /.nuxt/
