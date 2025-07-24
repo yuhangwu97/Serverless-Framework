@@ -1,0 +1,408 @@
+# Campus Management System - Unified Kong Configuration
+# This file consolidates all Kong routing configurations
+_format_version: "3.0"
+_transform: true
+
+services:
+  # Node.js Middleware Service (中台) - UI 聚合和认证
+  - name: middleware-service
+    url: http://middleware-service:3001
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - http://localhost:3000
+            - http://web-client:3000
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - Authorization
+            - X-User-ID
+            - X-User-Role
+            - X-User-Name
+            - X-User-Email
+          credentials: true
+          max_age: 3600
+
+  # Python Analytics Service (分析服务)
+  - name: analytics-service
+    url: http://analytics-service:8001
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - http://localhost:3000
+            - http://web-client:3000
+          credentials: true
+
+routes:
+  # ================================
+  # UI Routes - 通过中台处理聚合，使用 Cookie 认证
+  # ================================
+  
+  # 校园认证 UI 路由
+  - name: ui-campus-auth
+    service: middleware-service
+    paths:
+      - /ui/campus-auth
+    strip_path: false
+    plugins:
+      - name: session
+        config:
+          storage: cookie
+          secret: your-session-secret-key
+          cookie_name: campus_session
+          cookie_secure: false
+          cookie_httponly: true
+          cookie_samesite: Lax
+
+  # UI 聚合路由 - 需要复杂聚合的通过中台
+  - name: ui-aggregated-routes
+    service: middleware-service
+    paths:
+      - /ui/business/summary     # 业务数据聚合
+      - /ui/analytics/summary    # 分析数据聚合
+    strip_path: false
+    plugins:
+      - name: session
+        config:
+          storage: cookie
+          secret: your-session-secret-key
+          cookie_name: campus_session
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-ID:$(headers.x_authenticated_userid)"
+              - "X-User-Role:$(headers.x_authenticated_scope)"
+              - "X-User-Name:$(headers.x_authenticated_username)"
+              - "X-User-Email:$(headers.x_authenticated_email)"
+
+  # UI 其他路由 - 简单页面通过中台
+  - name: ui-simple-routes
+    service: middleware-service
+    paths:
+      - /ui/user
+      - /ui/business
+      - /ui/analytics
+      - /ui/graph
+    strip_path: false
+    plugins:
+      - name: session
+        config:
+          storage: cookie
+          secret: your-session-secret-key
+          cookie_name: campus_session
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-ID:$(headers.x_authenticated_userid)"
+              - "X-User-Role:$(headers.x_authenticated_scope)"
+              - "X-User-Name:$(headers.x_authenticated_username)"
+              - "X-User-Email:$(headers.x_authenticated_email)"
+
+  # ================================
+  # API Routes - 使用 JWT 认证，部分直接处理
+  # ================================
+
+  # API 认证路由 - 通过中台处理
+  - name: api-campus-auth
+    service: middleware-service
+    paths:
+      - /api/campus-auth
+    strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+          claims_to_verify:
+            - exp
+          key_claim_name: userId
+          maximum_expiration: 86400
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-ID:$(jwt.userId)"
+              - "X-User-Role:$(jwt.role)"
+              - "X-User-Name:$(jwt.name)"
+              - "X-User-Email:$(jwt.email)"
+
+  # API Business Summary - 直接通过 Kong Lua 处理 gRPC 调用
+  - name: api-business-summary
+    service: middleware-service  # Fallback service, won't be used due to Lua exit
+    paths:
+      - /api/business/summary
+    strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+          claims_to_verify:
+            - exp
+          key_claim_name: userId
+          maximum_expiration: 86400
+      - name: lua
+        config:
+          access_by_lua_block: |
+            -- API Business Summary Handler - Direct gRPC Call
+            local cjson = require "cjson"
+            local jwt = require "resty.jwt"
+            
+            -- Load our business gRPC client
+            local business_grpc = require "kong-business-grpc"
+            
+            local function extract_user_info()
+              local auth_header = kong.request.get_header("authorization")
+              if not auth_header then
+                kong.response.exit(401, {
+                  success = false,
+                  error = "Missing authorization header",
+                  code = "MISSING_AUTH"
+                })
+                return
+              end
+              
+              local token = string.match(auth_header, "Bearer%s+(.+)")
+              if not token then
+                kong.response.exit(401, {
+                  success = false,
+                  error = "Invalid authorization format",
+                  code = "INVALID_AUTH_FORMAT"
+                })
+                return
+              end
+              
+              local jwt_obj = jwt:verify("your-jwt-secret-key", token)
+              if not jwt_obj or not jwt_obj.valid then
+                kong.response.exit(401, {
+                  success = false,
+                  error = "Invalid or expired token",
+                  code = "INVALID_TOKEN"
+                })
+                return
+              end
+              
+              return jwt_obj.payload
+            end
+            
+            -- Main handler logic for /api/business/summary
+            kong.log.info("Kong Lua: Handling /api/business/summary")
+            
+            local user_info = extract_user_info()
+            if not user_info then
+              return  -- extract_user_info already sent error response
+            end
+            
+            -- Call business-service via gRPC (simulated)
+            local business_result = business_grpc.call_business_summary(user_info.userId)
+            
+            if business_result.success then
+              kong.response.exit(200, {
+                success = true,
+                data = business_result.data,
+                source = "kong-lua-business-grpc",
+                user_id = user_info.userId,
+                timestamp = business_result.timestamp
+              })
+            else
+              kong.response.exit(500, {
+                success = false,
+                error = business_result.error,
+                source = "kong-lua-business-grpc",
+                user_id = user_info.userId
+              })
+            end
+
+  # API 其他业务路由 - 通过中台处理
+  - name: api-business-middleware
+    service: middleware-service
+    paths:
+      - /api/business/data
+      - /api/business/records
+      - /api/business/courses
+      - /api/business/enrollments
+      - /api/business/grades
+    strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+          claims_to_verify:
+            - exp
+          key_claim_name: userId
+          maximum_expiration: 86400
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-ID:$(jwt.userId)"
+              - "X-User-Role:$(jwt.role)"
+              - "X-User-Name:$(jwt.name)"
+              - "X-User-Email:$(jwt.email)"
+
+  # API 分析服务直接访问
+  - name: api-analytics-direct
+    service: analytics-service
+    paths:
+      - /api/analytics/dashboard
+      - /api/analytics/query
+      - /api/analytics/export
+      - /api/analytics/report
+      - /api/data/events
+    strip_path: true
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+          claims_to_verify:
+            - exp
+          key_claim_name: userId
+          maximum_expiration: 86400
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-ID:$(jwt.userId)"
+              - "X-User-Role:$(jwt.role)"
+              - "X-User-Name:$(jwt.name)"
+              - "X-User-Email:$(jwt.email)"
+          remove:
+            headers:
+              - "authorization"
+
+  # API 聚合摘要路由 - 通过中台处理
+  - name: api-analytics-summary
+    service: middleware-service
+    paths:
+      - /api/analytics/summary
+    strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          secret_is_base64: false
+          claims_to_verify:
+            - exp
+          key_claim_name: userId
+          maximum_expiration: 86400
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-User-ID:$(jwt.userId)"
+              - "X-User-Role:$(jwt.role)"
+              - "X-User-Name:$(jwt.name)"
+              - "X-User-Email:$(jwt.email)"
+
+  # ================================
+  # Health Check Routes - 无需认证
+  # ================================
+  - name: health-middleware
+    service: middleware-service
+    paths:
+      - /health/middleware
+      - /health/business
+    strip_path: true
+
+  - name: health-analytics
+    service: analytics-service
+    paths:
+      - /health/analytics
+    strip_path: true
+
+  # ================================
+  # Development Routes
+  # ================================
+  - name: dev-routes
+    service: middleware-service
+    paths:
+      - /dev
+    strip_path: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+
+# JWT Consumers
+consumers:
+  - username: campus-jwt-consumer
+    jwt_secrets:
+      - key: campus-jwt-secret
+        secret: your-jwt-secret-key
+
+  - username: dev-consumer
+    keyauth_credentials:
+      - key: dev-api-key
+
+# Global Plugins
+plugins:
+  # Request tracking
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      echo_downstream: true
+
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      echo_downstream: true
+
+  # Rate limiting
+  - name: rate-limiting
+    config:
+      minute: 200
+      hour: 2000
+      day: 10000
+      policy: local
+
+  # Monitoring
+  - name: prometheus
+    config:
+      per_consumer: true
+
+  # Global authentication and logging
+  - name: lua
+    config:
+      access_by_lua_block: |
+        -- Global Campus API Gateway Logic
+        local function log_request()
+          local method = kong.request.get_method()
+          local path = kong.request.get_path()
+          local user_id = kong.request.get_header("X-User-ID") or "anonymous"
+          kong.log.info("Campus Gateway: ", method, " ", path, " User: ", user_id)
+        end
+        
+        local function inject_global_headers()
+          kong.service.request.set_header("X-Kong-Gateway", "campus-gateway")
+          kong.service.request.set_header("X-Gateway-Time", ngx.time())
+        end
+        
+        -- Skip for health checks
+        local path = kong.request.get_path()
+        if string.match(path, "^/health/") then
+          log_request()
+          return
+        end
+        
+        inject_global_headers()
+        log_request()
+      
+      header_filter_by_lua_block: |
+        -- Add security and API headers
+        kong.response.set_header("X-Kong-Gateway", "campus-api-gateway")
+        kong.response.set_header("X-API-Version", "v1.0")
+        kong.response.set_header("X-Content-Type-Options", "nosniff")
+        kong.response.set_header("X-Frame-Options", "DENY")
+        kong.response.set_header("X-XSS-Protection", "1; mode=block")

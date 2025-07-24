@@ -1,0 +1,14 @@
+/node_modules/
+/dist/
+/.env
+/.cache/
+.DS_Store
+*.log
+*.tmp
+/3-nodejs-middle-platform/node_modules/
+/1-react-frontend/node_modules/
+.*/settings.local.json
+/.vscode/
+/.idea/
+/.nuxt/
+/.nuxtignore

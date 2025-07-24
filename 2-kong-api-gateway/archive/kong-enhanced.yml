@@ -1,0 +1,385 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: nodejs-service
+    url: http://nodejs:3001
+    connect_timeout: 30000
+    read_timeout: 30000
+    write_timeout: 30000
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - http://localhost:3000
+            - http://frontend:3000
+            - https://yourdomain.com
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+            - PATCH
+          headers:
+            - Accept
+            - Accept-Version
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - Authorization
+            - X-Requested-With
+          credentials: true
+          max_age: 3600
+          
+      - name: response-transformer
+        config:
+          add:
+            headers:
+              - "X-Service-Name:nodejs"
+              - "X-Response-Time:{{latency}}"
+
+  - name: golang-service
+    url: http://golang:8080
+    connect_timeout: 30000
+    read_timeout: 30000
+    write_timeout: 30000
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - http://localhost:3000
+            - http://frontend:3000
+            - https://yourdomain.com
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+            - PATCH
+          headers:
+            - Accept
+            - Accept-Version
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - Authorization
+          credentials: false
+          max_age: 3600
+          
+      - name: response-transformer
+        config:
+          add:
+            headers:
+              - "X-Service-Name:golang"
+              - "X-Response-Time:{{latency}}"
+
+  - name: python-service
+    url: http://python:8001
+    connect_timeout: 30000
+    read_timeout: 30000
+    write_timeout: 30000
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - http://localhost:3000
+            - http://frontend:3000
+            - https://yourdomain.com
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+            - PATCH
+          headers:
+            - Accept
+            - Accept-Version
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - Authorization
+          credentials: false
+          max_age: 3600
+          
+      - name: response-transformer
+        config:
+          add:
+            headers:
+              - "X-Service-Name:python"
+              - "X-Response-Time:{{latency}}"
+
+routes:
+  # UI Routes - Cookie-based authentication via Lua scripts
+  - name: ui-auth-route
+    service: nodejs-service
+    paths:
+      - /ui/auth
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:ui-auth"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              
+              -- Allow auth endpoints without cookie validation
+              local uri = ngx.var.uri
+              if string.match(uri, "/ui/auth/login") or string.match(uri, "/ui/auth/register") then
+                return
+              end
+              
+              local cookie_auth = require("cookie-auth")
+              cookie_auth.execute()
+
+  - name: ui-user-route
+    service: nodejs-service
+    paths:
+      - /ui/user
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:ui-user"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              local cookie_auth = require("cookie-auth")
+              cookie_auth.execute()
+
+  - name: ui-graph-route
+    service: nodejs-service
+    paths:
+      - /ui/graph
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:ui-graph"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              local cookie_auth = require("cookie-auth")
+              cookie_auth.execute()
+
+  - name: ui-business-route
+    service: nodejs-service
+    paths:
+      - /ui/business
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:ui-business"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              local cookie_auth = require("cookie-auth")
+              cookie_auth.execute()
+
+  - name: ui-analytics-route
+    service: nodejs-service
+    paths:
+      - /ui/analytics
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:ui-analytics"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              local cookie_auth = require("cookie-auth")
+              cookie_auth.execute()
+
+  # API Routes - JWT authentication via Lua scripts
+  - name: api-business-route
+    service: golang-service
+    paths:
+      - /api/business
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:api-business"
+              - "X-Target-Service:golang"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              local jwt_auth = require("jwt-auth")
+              jwt_auth.execute()
+      - name: rate-limiting
+        config:
+          minute: 200
+          hour: 2000
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          fault_tolerant: true
+
+  - name: api-data-route
+    service: python-service
+    paths:
+      - /api/data
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:api-data"
+              - "X-Target-Service:python"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              local jwt_auth = require("jwt-auth")
+              jwt_auth.execute()
+      - name: rate-limiting
+        config:
+          minute: 300
+          hour: 3000
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          fault_tolerant: true
+
+  - name: api-analytics-route
+    service: python-service
+    paths:
+      - /api/analytics
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:api-analytics"
+              - "X-Target-Service:python"
+      - name: pre-function
+        config:
+          access:
+            - |
+              local security = require("security")
+              security.execute()
+              local jwt_auth = require("jwt-auth")
+              jwt_auth.execute()
+      - name: rate-limiting
+        config:
+          minute: 150
+          hour: 1500
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          fault_tolerant: true
+
+  # Health check routes (no authentication required)
+  - name: health-check-route
+    service: nodejs-service
+    paths:
+      - /health
+    strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Route-Type:health"
+
+consumers:
+  - username: jwt-consumer
+    jwt_secrets:
+      - key: jwt-secret
+        secret: your-jwt-secret-key
+
+plugins:
+  # Global plugins
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      echo_downstream: true
+
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      echo_downstream: true
+
+  - name: prometheus
+    config:
+      per_consumer: true
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+
+  - name: file-log
+    config:
+      path: /tmp/kong-access.log
+      custom_fields_by_lua:
+        user_id: "return ngx.req.get_headers()['X-User-ID'] or 'anonymous'"
+        auth_method: "return ngx.req.get_headers()['X-Auth-Method'] or 'none'"
+        route_type: "return ngx.req.get_headers()['X-Route-Type'] or 'unknown'"
+
+  # Global rate limiting
+  - name: rate-limiting
+    config:
+      minute: 500
+      hour: 5000
+      policy: redis
+      redis_host: redis
+      redis_port: 6379
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # Global security headers
+  - name: response-transformer
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "X-XSS-Protection:1; mode=block"
+          - "Strict-Transport-Security:max-age=31536000; includeSubDomains"
+          - "Referrer-Policy:strict-origin-when-cross-origin"
+
+  # Request size limiting
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 10

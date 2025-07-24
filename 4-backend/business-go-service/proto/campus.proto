@@ -1,0 +1,238 @@
+syntax = "proto3";
+
+package campus;
+
+option go_package = "golang-business-service/proto";
+
+import "google/protobuf/timestamp.proto";
+
+// 注意：用户、学生、教师信息已迁移到MongoDB，不再通过gRPC提供
+
+// 学院信息
+message College {
+  int32 id = 1;
+  string code = 2;
+  string name = 3;
+  string description = 4;
+  string dean_id = 5;
+  string contact_phone = 6;
+  string contact_email = 7;
+}
+
+// 专业信息
+message Major {
+  int32 id = 1;
+  string code = 2;
+  string name = 3;
+  int32 college_id = 4;
+  string degree_type = 5;
+  int32 duration_years = 6;
+  string description = 7;
+}
+
+// 课程信息
+message Course {
+  int32 id = 1;
+  string course_code = 2;
+  string name = 3;
+  string name_en = 4;
+  int32 college_id = 5;
+  int32 major_id = 6;
+  double credits = 7;
+  string course_type = 8;
+  string semester_type = 9;
+  int32 total_hours = 10;
+  string description = 11;
+  string prerequisites = 12;
+}
+
+// 教学班信息
+message CourseClass {
+  int32 id = 1;
+  int32 course_id = 2;
+  string class_code = 3;
+  string teacher_id = 4;
+  string semester = 5;
+  int32 year = 6;
+  int32 max_students = 7;
+  int32 enrolled_students = 8;
+  string classroom = 9;
+  string schedule = 10;
+  string status = 11;
+}
+
+// 选课记录
+message CourseEnrollment {
+  int32 id = 1;
+  string student_id = 2;
+  int32 course_class_id = 3;
+  google.protobuf.Timestamp enrollment_date = 4;
+  string status = 5;
+  double final_grade = 6;
+  double gpa_points = 7;
+  bool is_retake = 8;
+}
+
+// 成绩记录
+message GradeRecord {
+  int32 id = 1;
+  int32 enrollment_id = 2;
+  string exam_type = 3;
+  string exam_name = 4;
+  double score = 5;
+  double max_score = 6;
+  double weight = 7;
+  google.protobuf.Timestamp exam_date = 8;
+  string created_by = 9;
+}
+
+// 图书信息
+message Book {
+  int32 id = 1;
+  string isbn = 2;
+  string title = 3;
+  string author = 4;
+  string publisher = 5;
+  int32 publish_year = 6;
+  string category = 7;
+  string location = 8;
+  int32 total_copies = 9;
+  int32 available_copies = 10;
+}
+
+// 借阅记录
+message BookBorrowing {
+  int32 id = 1;
+  string user_id = 2;
+  int32 book_id = 3;
+  google.protobuf.Timestamp borrow_date = 4;
+  google.protobuf.Timestamp due_date = 5;
+  google.protobuf.Timestamp return_date = 6;
+  string status = 7;
+  double fine_amount = 8;
+}
+
+// 请求和响应消息
+
+// 课程相关
+message GetCoursesRequest {
+  int32 college_id = 1;
+  int32 major_id = 2;
+  string course_type = 3;
+  string semester_type = 4;
+  int32 page = 5;
+  int32 limit = 6;
+  string search = 7;
+}
+
+message GetCoursesResponse {
+  bool success = 1;
+  repeated Course courses = 2;
+  int64 total = 3;
+  string message = 4;
+}
+
+message GetCourseClassesRequest {
+  int32 course_id = 1;
+  string teacher_id = 2;
+  string semester = 3;
+  int32 year = 4;
+  int32 page = 5;
+  int32 limit = 6;
+}
+
+message GetCourseClassesResponse {
+  bool success = 1;
+  repeated CourseClass course_classes = 2;
+  int64 total = 3;
+  string message = 4;
+}
+
+// 选课相关
+message GetEnrollmentsRequest {
+  string student_id = 1;
+  string semester = 2;
+  int32 year = 3;
+  string status = 4;
+}
+
+message GetEnrollmentsResponse {
+  bool success = 1;
+  repeated CourseEnrollment enrollments = 2;
+  string message = 3;
+}
+
+// 成绩相关
+message GetGradesRequest {
+  string student_id = 1;
+  int32 course_class_id = 2;
+  string semester = 3;
+  int32 year = 4;
+}
+
+message GetGradesResponse {
+  bool success = 1;
+  repeated GradeRecord grades = 2;
+  string message = 3;
+}
+
+// 图书馆相关
+message GetBooksRequest {
+  string category = 1;
+  string search = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message GetBooksResponse {
+  bool success = 1;
+  repeated Book books = 2;
+  int64 total = 3;
+  string message = 4;
+}
+
+message GetBorrowingsRequest {
+  string user_id = 1;
+  string status = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message GetBorrowingsResponse {
+  bool success = 1;
+  repeated BookBorrowing borrowings = 2;
+  int64 total = 3;
+  string message = 4;
+}
+
+// 系统统计
+message GetStatsRequest {
+  string type = 1; // user, course, enrollment, book
+  string period = 2; // daily, weekly, monthly
+}
+
+message GetStatsResponse {
+  bool success = 1;
+  map<string, int64> stats = 2;
+  string message = 3;
+}
+
+// 校园管理服务定义
+service CampusService {
+  // 课程管理
+  rpc GetCourses(GetCoursesRequest) returns (GetCoursesResponse);
+  rpc GetCourseClasses(GetCourseClassesRequest) returns (GetCourseClassesResponse);
+  
+  // 选课管理
+  rpc GetEnrollments(GetEnrollmentsRequest) returns (GetEnrollmentsResponse);
+  
+  // 成绩管理
+  rpc GetGrades(GetGradesRequest) returns (GetGradesResponse);
+  
+  // 图书馆管理
+  rpc GetBooks(GetBooksRequest) returns (GetBooksResponse);
+  rpc GetBorrowings(GetBorrowingsRequest) returns (GetBorrowingsResponse);
+  
+  // 系统统计
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+}

@@ -1,0 +1,255 @@
+version: '3.8'
+
+services:
+  # Frontend React Application
+  web-client:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - kong
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # Node.js Middleware Service (中台)
+  middleware-service:
+    build:
+      context: ../middle-platform
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - MONGODB_URI=mongodb://root:rootpassword@mongodb:27017/campus_auth?authSource=admin
+      - SESSION_SECRET=your-session-secret-key
+      - JWT_SECRET=your-jwt-secret-key
+      - NODE_ENV=production
+      - FRONTEND_URL=http://localhost:3000
+      - BUSINESS_GRPC_URL=business-service:9090
+      - ANALYTICS_SERVICE_URL=http://analytics-service:8001
+    depends_on:
+      - mongodb
+      - business-service
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # Golang Business Service (后台) - gRPC Only
+  business-service:
+    build:
+      context: ../backend/business-service
+      dockerfile: Dockerfile
+    ports:
+      - "9090:9090"
+    environment:
+      - GRPC_PORT=9090
+      - DATABASE_URL=campus_user:campus_password@tcp(mysql:3306)/campus_management?charset=utf8mb4&parseTime=True&loc=Local
+    depends_on:
+      - mysql
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # Python Analytics Service (辅助后台)
+  analytics-service:
+    build:
+      context: ../backend/analytics-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - MONGODB_URL=mongodb://root:rootpassword@mongodb:27017?authSource=admin
+      - DATABASE_NAME=campus_analytics
+      - REDIS_URL=redis://redis:6379
+      - BUSINESS_GRPC_URL=business-service:9090
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:6.0
+    container_name: microservice-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      MONGO_INITDB_DATABASE: microservice
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./infrastructure/databases/mongodb/init:/docker-entrypoint-initdb.d
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: microservice-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: business_db
+      MYSQL_USER: appuser
+      MYSQL_PASSWORD: apppassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infrastructure/databases/mysql/init:/docker-entrypoint-initdb.d
+    networks:
+      - microservice-network
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Redis Cache
+  redis:
+    image: redis:7.0-alpine
+    container_name: microservice-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./infrastructure/databases/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - microservice-network
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  # Kong Database
+  kong-database:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: kong
+      POSTGRES_DB: kong
+    volumes:
+      - kong_data:/var/lib/postgresql/data
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # Kong Migrations
+  kong-migrations:
+    image: kong/kong-gateway:3.4
+    command: kong migrations bootstrap
+    depends_on:
+      - kong-database
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong
+      KONG_PG_DATABASE: kong
+    networks:
+      - microservice-network
+
+  # Kong API Gateway
+  kong:
+    image: kong/kong-gateway:3.4
+    depends_on:
+      - kong-database
+      - kong-migrations
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong
+      KONG_PG_DATABASE: kong
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PLUGINS: bundled,cors,jwt,rate-limiting,request-id,correlation-id,prometheus
+      KONG_LUA_PACKAGE_PATH: /usr/local/share/lua/5.1/?.lua;/etc/kong/?.lua;;
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8002:8001"
+      - "8444:8444"
+    volumes:
+      - ../api-gateway/kong-config.yml:/tmp/kong.yml
+      - ../api-gateway/kong-grpc-client.lua:/etc/kong/kong-grpc-client.lua
+      - ../api-gateway/kong-business-grpc.lua:/etc/kong/kong-business-grpc.lua
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  # Kong Configuration
+  kong-deck:
+    image: kong/deck:1.17
+    depends_on:
+      - kong
+    command: deck sync --kong-addr http://kong:8001 --state /tmp/kong.yml
+    volumes:
+      - ../api-gateway/kong-config.yml:/tmp/kong.yml
+    networks:
+      - microservice-network
+
+  # Database Management Tools
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: rootpassword
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    ports:
+      - "8082:8081"
+    depends_on:
+      - mongodb
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: rootpassword
+    ports:
+      - "8083:80"
+    depends_on:
+      - mysql
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+  mysql_data:
+  redis_data:
+  kong_data:
+
+networks:
+  microservice-network:
+    driver: bridge

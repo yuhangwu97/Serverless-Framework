@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package business;
+
+option go_package = "golang-business-service/proto";
+
+import "google/protobuf/timestamp.proto";
+
+// Business Record message
+message BusinessRecord {
+  uint32 id = 1;
+  string title = 2;
+  string description = 3;
+  string category = 4;
+  string status = 5;
+  int32 priority = 6;
+  string user_id = 7;
+  string metadata = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// Request messages
+message GetBusinessDataRequest {
+  string user_id = 1;
+  int32 page = 2;
+  int32 limit = 3;
+}
+
+message GetBusinessDataResponse {
+  bool success = 1;
+  repeated BusinessRecord data = 2;
+  int32 total = 3;
+  string message = 4;
+}
+
+message CreateRecordRequest {
+  string title = 1;
+  string description = 2;
+  string category = 3;
+  int32 priority = 4;
+  string user_id = 5;
+  string metadata = 6;
+}
+
+message CreateRecordResponse {
+  bool success = 1;
+  BusinessRecord data = 2;
+  string message = 3;
+}
+
+message GetRecordsRequest {
+  string user_id = 1;
+  int32 page = 2;
+  int32 limit = 3;
+  string category = 4;
+  string status = 5;
+}
+
+message GetRecordsResponse {
+  bool success = 1;
+  repeated BusinessRecord data = 2;
+  int64 total = 3;
+  int32 page = 4;
+  int32 limit = 5;
+}
+
+message UpdateRecordRequest {
+  uint32 id = 1;
+  string user_id = 2;
+  string title = 3;
+  string description = 4;
+  string category = 5;
+  string status = 6;
+  int32 priority = 7;
+  string metadata = 8;
+}
+
+message UpdateRecordResponse {
+  bool success = 1;
+  BusinessRecord data = 2;
+  string message = 3;
+}
+
+message DeleteRecordRequest {
+  uint32 id = 1;
+  string user_id = 2;
+}
+
+message DeleteRecordResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetRecordByIdRequest {
+  uint32 id = 1;
+  string user_id = 2;
+}
+
+message GetRecordByIdResponse {
+  bool success = 1;
+  BusinessRecord data = 2;
+  string message = 3;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+  string service = 2;
+}
+
+// Business service definition
+service BusinessService {
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  
+  // Get business data summary
+  rpc GetBusinessData(GetBusinessDataRequest) returns (GetBusinessDataResponse);
+  
+  // CRUD operations for business records
+  rpc CreateRecord(CreateRecordRequest) returns (CreateRecordResponse);
+  rpc GetRecords(GetRecordsRequest) returns (GetRecordsResponse);
+  rpc GetRecordById(GetRecordByIdRequest) returns (GetRecordByIdResponse);
+  rpc UpdateRecord(UpdateRecordRequest) returns (UpdateRecordResponse);
+  rpc DeleteRecord(DeleteRecordRequest) returns (DeleteRecordResponse);
+}

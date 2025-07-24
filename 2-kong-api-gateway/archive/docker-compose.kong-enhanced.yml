@@ -1,0 +1,154 @@
+version: '3.8'
+
+services:
+  kong-database:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: kong
+      POSTGRES_DB: kong
+    volumes:
+      - kong_data:/var/lib/postgresql/data
+    networks:
+      - kong-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kong-migrations:
+    image: kong/kong-gateway:3.4
+    command: kong migrations bootstrap
+    depends_on:
+      kong-database:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong
+      KONG_PG_DATABASE: kong
+    networks:
+      - kong-net
+
+  kong:
+    image: kong/kong-gateway:3.4
+    depends_on:
+      - kong-database
+      - kong-migrations
+      - redis
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong
+      KONG_PG_DATABASE: kong
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PLUGINS: bundled,cors,jwt,rate-limiting,request-id,correlation-id,prometheus,pre-function,post-function,request-transformer,response-transformer,file-log,request-size-limiting
+      KONG_LUA_PACKAGE_PATH: /usr/local/share/lua/5.1/?.lua;/opt/kong/lua/?.lua;;
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: kong_cache 128m
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: kong_db_cache 128m
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: kong_locks 100k
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: kong_process_events 5m
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: kong_cluster_events 5m
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: kong_healthchecks 5m
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: kong_rate_limiting_counters 12m
+      SESSION_SECRET: your-session-secret-key
+      JWT_SECRET: your-jwt-secret-key
+      NODEJS_SERVICE_URL: http://nodejs:3001
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8001:8001"
+      - "8444:8444"
+    volumes:
+      - ./kong-enhanced.yml:/tmp/kong.yml
+      - ./lua:/usr/local/share/lua/5.1
+      - ./plugins:/opt/kong/plugins
+      - kong_logs:/tmp
+    networks:
+      - kong-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kong health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kong-deck:
+    image: kong/deck:1.17
+    depends_on:
+      kong:
+        condition: service_healthy
+    command: deck sync --kong-addr http://kong:8001 --state /tmp/kong.yml --verbose
+    volumes:
+      - ./kong-enhanced.yml:/tmp/kong.yml
+    networks:
+      - kong-net
+
+  redis:
+    image: redis:7.0-alpine
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - kong-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Kong Admin GUI (optional)
+  konga:
+    image: pantsel/konga:latest
+    depends_on:
+      kong:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      KONGA_HOOK_TIMEOUT: 120000
+    ports:
+      - "1337:1337"
+    networks:
+      - kong-net
+    restart: unless-stopped
+
+  # Prometheus for monitoring Kong metrics
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - kong-net
+    restart: unless-stopped
+
+volumes:
+  kong_data:
+  kong_logs:
+  redis_data:
+  prometheus_data:
+
+networks:
+  kong-net:
+    driver: bridge
